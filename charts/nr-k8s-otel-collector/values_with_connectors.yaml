@@ -1,0 +1,699 @@
+# Default values for nr-k8s-otel-collector.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+kube-state-metrics:
+  # kube-state-metrics.enabled -- Install the [`kube-state-metrics` chart](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-state-metrics) from the stable helm charts repository.
+  # This is mandatory if `infrastructure.enabled` is set to `true` and the user does not provide its own instance of KSM version >=1.8 and <=2.0. Note, kube-state-metrics v2+ disables labels/annotations
+  # metrics by default. You can enable the target labels/annotations metrics to be monitored by using the metricLabelsAllowlist/metricAnnotationsAllowList options described [here](https://github.com/prometheus-community/helm-charts/blob/159cd8e4fb89b8b107dcc100287504bb91bf30e0/charts/kube-state-metrics/values.yaml#L274) in
+  # your Kubernetes clusters.
+  enabled: true
+  # -- Disable prometheus from auto-discovering KSM and potentially scraping duplicated data
+  prometheusScrape: false
+
+image:
+  # -- OTel collector image to be deployed. You can use your own collector as long it accomplish the following requirements mentioned below.
+  repository: newrelic/nr-otel-collector
+  # -- The pull policy is defaulted to IfNotPresent, which skips pulling an image if it already exists. If pullPolicy is defined without a specific value, it is also set to Always.
+  pullPolicy: IfNotPresent
+  # --  Overrides the image tag whose default is the chart appVersion.
+  tag: "0.8.3"
+
+# -- Name of the Kubernetes cluster monitored. Mandatory. Can be configured also with `global.cluster`
+cluster: "testname"
+# -- This set this license key to use. Can be configured also with `global.licenseKey`
+licenseKey: "testlicensekey"
+# -- In case you don't want to have the license key in you values, this allows you to point to a user created secret to get the key from there. Can be configured also with `global.customSecretName`
+customSecretName: ""
+# -- In case you don't want to have the license key in you values, this allows you to point to which secret key is the license key located. Can be configured also with `global.customSecretLicenseKey`
+customSecretLicenseKey: ""
+
+# -- Additional labels for chart pods
+podLabels: {}
+# -- Additional labels for chart objects
+labels: {}
+
+# -- Sets pod's priorityClassName. Can be configured also with `global.priorityClassName`
+priorityClassName: ""
+
+# -- Sets pod's dnsConfig. Can be configured also with `global.dnsConfig`
+dnsConfig: {}
+
+# -- If deploying to a GKE autopilot cluster, set to true
+# @default -- `false`
+gkeAutopilot: false
+
+daemonset:
+  # -- Sets daemonset pod node selector. Overrides `nodeSelector` and `global.nodeSelector`
+  nodeSelector: {}
+  # -- Sets daemonset pod tolerations. Overrides `tolerations` and `global.tolerations`
+  tolerations: []
+  # -- Sets daemonset pod affinities. Overrides `affinity` and `global.affinity`
+  affinity: {}
+  # -- Annotations to be added to the daemonset.
+  podAnnotations: {}
+  # -- Sets security context (at pod level) for the daemonset. Overrides `podSecurityContext` and `global.podSecurityContext`
+  podSecurityContext: {}
+  # -- Sets security context (at container level) for the daemonset. Overrides `containerSecurityContext` and `global.containerSecurityContext`
+  containerSecurityContext:
+    privileged: true
+  # -- Sets resources for the daemonset.
+  resources: {}
+  # -- Sets additional environment variables for the daemonset.
+  envs: []
+  # -- Sets additional environment variable sources for the daemonset.
+  envsFrom: []
+  # -- Settings for daemonset configmap
+  # @default -- See `values.yaml`
+  configMap:
+    # -- OpenTelemetry config for the daemonset. If set, overrides default config and disables configuration parameters for the daemonset.
+    config: {}
+
+deployment:
+  # -- Sets deployment pod node selector. Overrides `nodeSelector` and `global.nodeSelector`
+  nodeSelector: {}
+  # -- Sets deployment pod tolerations. Overrides `tolerations` and `global.tolerations`
+  tolerations: []
+  # -- Sets deployment pod affinities. Overrides `affinity` and `global.affinity`
+  affinity: {}
+  # -- Annotations to be added to the deployment.
+  podAnnotations: {}
+  # -- Sets security context (at pod level) for the deployment. Overrides `podSecurityContext` and `global.podSecurityContext`
+  podSecurityContext: {}
+  # -- Sets security context (at container level) for the deployment. Overrides `containerSecurityContext` and `global.containerSecurityContext`
+  containerSecurityContext: {}
+  # -- Sets resources for the deployment.
+  resources: {}
+  # -- Sets additional environment variables for the deployment.
+  envs: []
+  # -- Sets additional environment variable sources for the deployment.
+  envsFrom: []
+  # -- Settings for deployment configmap
+  # @default -- See `values.yaml`
+  configMap:
+    # -- OpenTelemetry config for the deployment. If set, overrides default config and disables configuration parameters for the deployment.
+    config: {}
+
+  collectorConfig:
+    # -- OpenTelemetry config for the deployment.
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: ${env:MY_POD_IP}:4318
+      k8s_events:
+      prometheus:
+        config:
+          scrape_configs: 
+            - job_name: kube-state-metrics
+              scrape_interval: 1m
+              kubernetes_sd_configs:
+                - role: pod
+              relabel_configs:
+                - action: keep
+                  regex: kube-state-metrics
+                  source_labels:
+                    - __meta_kubernetes_pod_label_app_kubernetes_io_name
+                - action: replace
+                  target_label: job_label
+                  replacement: kube-state-metrics
+            - job_name: apiserver
+              scrape_interval: 1m
+              kubernetes_sd_configs:
+                - role: endpoints
+                  namespaces:
+                    names:
+                      - default
+              scheme: https
+              tls_config:
+                ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                insecure_skip_verify: false
+              bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              relabel_configs:
+              - action: keep
+                regex: default;kubernetes;https
+                source_labels:
+                - __meta_kubernetes_namespace
+                - __meta_kubernetes_service_name
+                - __meta_kubernetes_endpoint_port_name
+              - action: replace
+                source_labels:
+                - __meta_kubernetes_namespace
+                target_label: namespace
+              - action: replace
+                source_labels:
+                - __meta_kubernetes_service_name
+                target_label: service
+              - action: replace
+                target_label: job_label
+                replacement: apiserver
+
+    processors:
+      groupbyattrs:
+        keys:
+          - pod
+          - container
+          - daemonset
+          - replicaset
+          - statefulset
+          - deployment
+          - cronjob
+          - configmap
+          - job
+          - job_name
+          - horizontalpodautoscaler
+          - persistentvolume
+          - persistentvolumeclaim
+          - endpoint
+          - mutatingwebhookconfiguration
+          - validatingwebhookconfiguration
+          - lease
+          - storageclass
+          - secret
+          - service
+          - resourcequota
+          - node
+          - namespace
+
+      transform/ksm:
+        metric_statements:
+          - context: resource
+            statements:
+              - delete_key(attributes, "k8s.pod.name")
+              - delete_key(attributes, "k8s.pod.uid")
+              - delete_key(attributes, "k8s.container.name")
+              - delete_key(attributes, "k8s.namespace.name")
+              - delete_key(attributes, "k8s.node.name")
+              - delete_key(attributes, "k8s.replicaset.name")
+              - set(attributes["k8s.pod.name"], attributes["pod"])
+              - set(attributes["k8s.daemonset.name"], attributes["daemonset"])
+              - set(attributes["k8s.replicaset.name"], attributes["replicaset"])
+              - set(attributes["k8s.statefulset.name"], attributes["statefulset"])
+              - set(attributes["k8s.deployment.name"], attributes["deployment"])
+              - set(attributes["k8s.node.name"], attributes["node"])
+              - set(attributes["k8s.namespace.name"], attributes["namespace"])
+              - set(attributes["k8s.container.name"], attributes["container"])
+              - set(attributes["k8s.uid.uid"], attributes["uid"])
+
+      metricstransform/k8s_cluster_info:
+        transforms:
+          - include: kubernetes_build_info
+            action: update
+            new_name: k8s.cluster.info 
+
+      metricstransform/k8s_cluster_info_ldm:
+        transforms:
+          - include: k8s.cluster.info
+            action: update
+            operations: 
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+
+      metricstransform/kube_pod_status_phase:
+        transforms:
+          - include: 'kube_pod_container_status_waiting'
+            match_type: strict 
+            action: update
+            new_name: 'kube_pod_container_status_phase'
+            operations:
+            - action: add_label
+              new_label: container_phase
+              new_value: waiting 
+          - include: 'kube_pod_container_status_running'
+            match_type: strict
+            action: update
+            new_name: 'kube_pod_container_status_phase'
+            operations:
+            - action: add_label
+              new_label: container_phase
+              new_value: running 
+          - include: 'kube_pod_container_status_terminated'
+            match_type: strict
+            action: update
+            new_name: 'kube_pod_container_status_phase'
+            operations:
+            - action: add_label
+              new_label: container_phase
+              new_value: terminated 
+
+      metricstransform/ldm:
+        transforms:
+          - include: .*
+            match_type: regexp
+            action: update
+            operations:
+            - action: add_label
+              new_label: low.data.mode
+              new_value: 'false'
+    
+      metricstransform/ksm:
+        transforms:
+          - include: kube_cronjob_(created|spec_suspend|status_(active|last_schedule_time))
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: kube_daemonset_(created|status_(current_number_scheduled|desired_number_scheduled|updated_number_scheduled)|status_number_(available|misscheduled|ready|unavailable))
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: kube_deployment_(created|metadata_generation|spec_(replicas|strategy_rollingupdate_max_surge)|status_(condition|observed_generation|replicas)|status_replicas_(available|ready|unavailable|updated))
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: kube_horizontalpodautoscaler_(spec_(max_replicas|min_replicas)|status_(condition|current_replicas|desired_replicas))
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: kube_job_(complete|created|failed|spec_(active_deadline_seconds|completions|parallelism)|status_(active|completion_time|failed|start_time|succeeded))
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: kube_node_status_(allocatable|condition)
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: kube_persistentvolume_(capacity_bytes|created|info|status_phase)
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: kube_persistentvolumeclaim_(created|info|resource_requests_storage_bytes|status_phase)
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: kube_pod_container_(resource_(limits|requests)|status_(phase|ready|restarts_total|waiting_reason))
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: kube_pod_(created|info|status_(phase|ready|ready_time|scheduled|scheduled_time))
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: kube_service_(annotations|created|info|labels|spec_type|status_load_balancer_ingress)
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: kube_statefulset_(created|persistentvolumeclaim_retention_policy|replicas|status_(current_revision|replicas)|status_replicas_(available|current|ready|updated))
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+      
+      metricstransform/apiserver:
+        transforms:
+          - include: apiserver_storage_objects
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: go_(goroutines|threads)
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+          - include: process_resident_memory_bytes
+            action: update
+            match_type: regexp
+            operations:
+            - action: update_label
+              label: low.data.mode
+              value_actions:
+              - value: 'false'
+                new_value: 'true'
+    
+      filter/exclude_metrics_low_data_mode:
+        metrics:
+          metric:
+            - 'HasAttrOnDatapoint("low.data.mode", "false")'
+
+      filter/exclude_zero_value_kube_node_status_condition:
+        metrics:
+          datapoint:
+            - metric.name == "kube_node_status_condition" and value_double == 0.0 
+
+      filter/exclude_zero_value_kube_persistentvolumeclaim_status_phase:
+        metrics:
+          datapoint:
+            - metric.name == "kube_persistentvolumeclaim_status_phase" and value_double == 0.0 
+
+      filter/exclude_zero_value_kube_pod_status_phase:
+        metrics:
+          datapoint:
+            - metric.name == "kube_pod_status_phase" and value_double == 0.0 
+
+      filter/exclude_zero_value_kube_pod_container_status:
+        metrics:
+          datapoint:
+            - metric.name == "kube_pod_container_status" and value_double == 0.0 
+
+      resourcedetection/env:
+        detectors: ["env", "system"]
+        override: false
+        system:
+          hostname_sources: ["os"]
+          resource_attributes:
+            host.id:
+              enabled: true
+
+      resourcedetection/cloudproviders:
+        detectors: [gcp, eks, azure, aks, ec2, ecs]
+        timeout: 2s
+        override: false
+        ec2:
+          resource_attributes:
+            host.name:
+              enabled: false
+
+      resource/metrics:
+        attributes:
+          - key: host.id
+            from_attribute: host.name
+            action: upsert
+          - key: k8s.cluster.name
+            action: upsert
+            value: ${env:NR_CLUSTER_NAME}
+          - key: newrelicOnly
+            action: upsert
+            value: 'true'
+          - key: service.name
+            action: delete
+          - key: service_name
+            action: delete
+      
+      resource/events:
+        attributes:
+          - key: "event.name"
+            action: upsert
+            value: "InfrastructureEvent"
+          - key: "event.domain"
+            action: upsert
+            value: "newrelic-otel-event"
+          - key: "category"
+            action: upsert
+            value: "kubernetes"
+          - key: k8s.cluster.name
+            action: upsert
+            value: ${env:NR_CLUSTER_NAME}
+          - key: newrelicOnly
+            action: upsert
+            value: 'true'
+
+      transform/events:
+        log_statements:
+          - context: log
+            statements:
+              - set(attributes["event.source.host"], resource.attributes["k8s.node.name"])
+
+      transform/low_data_mode_inator:
+        metric_statements:
+          - context: metric
+            statements:
+              - set(description, "")
+              - set(unit, "")
+
+      resource/low_data_mode_inator:
+        attributes:
+          - key: http.scheme
+            action: delete
+          - key: net.host.name
+            action: delete
+          - key: net.host.port
+            action: delete
+
+      cumulativetodelta:
+
+      k8sattributes:
+        auth_type: "serviceAccount"
+        passthrough: false
+        filter:
+          node_from_env_var: KUBE_NODE_NAME
+        extract:
+          metadata:
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.deployment.name
+            - k8s.namespace.name
+            - k8s.node.name
+            - k8s.pod.start_time
+        pod_association:
+          - sources: 
+            - from: resource_attribute
+              name: k8s.pod.uid
+
+      attributes/self:
+        actions:
+          - key: k8s.pod.name
+            action: upsert
+            from_attribute: pod
+          - key: k8s.deployment.name
+            action: upsert
+            from_attribute: deployment
+          - key: k8s.node.name
+            action: upsert
+            from_attribute: node
+          - key: k8s.namespace.name
+            action: upsert
+            from_attribute: namespace
+
+      memory_limiter:
+         check_interval: 1s
+         limit_percentage: 80
+         spike_limit_percentage: 25
+
+      batch:
+        send_batch_max_size: 1000
+        timeout: 30s
+        send_batch_size : 800
+
+    connectors:           
+      routing/metrics:
+        default_pipelines: [metrics/default]
+        error_mode: propagate
+        match_once: false
+        table:
+          - statement: route() where attributes["job_label"] == "kube-state-metrics"
+            pipelines: [metrics/nr_ksm]
+          - statement: route(  where attributes["job_label"] == "apiserver"
+            pipelines: [metrics/nr_apiserver]
+
+    exporters:
+      otlphttp/newrelic:
+        endpoint:  ${env:NR_OTEL_ENDPOINT} 
+        headers:
+          api-key: ${env:NR_LICENSE_KEY}
+    service:
+      telemetry:
+        logs:
+          level: "debug"
+      pipelines:
+        metrics/prometheus:
+          receivers:
+            - prometheus
+          processors: []
+          exporters:
+            - routing/metrics
+
+        metrics/nr_ksm:
+          processors:
+            - metricstransform/kube_pod_status_phase
+            - filter/exclude_zero_value_kube_node_status_condition
+            - filter/exclude_zero_value_kube_persistentvolumeclaim_status_phase
+            - filter/exclude_zero_value_kube_pod_status_phase
+            - filter/exclude_zero_value_kube_pod_container_status
+            - metricstransform/k8s_cluster_info
+            # if lowDataMode is disabled, the below are excluded
+            - metricstransform/ldm
+            - metricstransform/k8s_cluster_info_ldm
+            - metricstransform/ksm
+            - filter/exclude_metrics_low_data_mode
+            - transform/low_data_mode_inator
+            - resource/low_data_mode_inator
+            # if lowDataMode is disabled, the above are excluded
+            - resource/metrics
+            - resourcedetection/env
+            - resourcedetection/cloudproviders
+            - batch
+            - groupbyattrs
+            - transform/ksm
+          exporters:
+          - otlphttp/newrelic
+
+        metrics/nr_apiserver:
+          receivers:
+            - routing/metrics
+          processors:
+            - metricstransform/k8s_cluster_info
+            # if lowDataMode is disabled, the below are excluded
+            - metricstransform/ldm
+            - metricstransform/k8s_cluster_info_ldm
+            - metricstransform/apiserver
+            - filter/exclude_metrics_low_data_mode
+            - transform/low_data_mode_inator
+            - resource/low_data_mode_inator
+            # if lowDataMode is disabled, the above are excluded
+            - resource/metrics
+            - k8sattributes
+            - attributes/self
+            - memory_limiter
+            - cumulativetodelta
+            - batch
+          exporters:
+            - otlphttp/newrelic
+
+        metrics/default:
+          receivers:
+            - routing/metrics
+          processors:
+            - cumulativetodelta
+            - batch
+          exporters:
+            - otlphttp/newrelic
+
+        logs/events:
+          receivers:
+            - k8s_events
+          processors:
+            - transform/events
+            - resource/events
+            - batch
+          exporters:
+            - otlphttp/newrelic
+
+
+# -- Sets all pods' node selector. Can be configured also with `global.nodeSelector`
+nodeSelector: {}
+# -- Sets all pods' tolerations to node taints. Can be configured also with `global.tolerations`
+tolerations: []
+# -- Sets all pods' affinities. Can be configured also with `global.affinity`
+affinity: {}
+# -- Sets all security contexts (at pod level). Can be configured also with `global.securityContext.pod`
+podSecurityContext: {}
+# -- Sets all security context (at container level). Can be configured also with `global.securityContext.container`
+containerSecurityContext: {}
+
+rbac:
+  # -- Specifies whether RBAC resources should be created
+  create: true
+
+# -- Settings controlling ServiceAccount creation
+# @default -- See `values.yaml`
+serviceAccount:
+  # serviceAccount.create -- (bool) Specifies whether a ServiceAccount should be created
+  # @default -- `true`
+  create:
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+  # Specify any annotations to add to the ServiceAccount
+  annotations:
+
+# -- (bool) Sets the debug logs to this integration or all integrations if it is set globally. Can be configured also with `global.verboseLog`
+# @default -- `false`
+verboseLog: 
+
+# -- (bool) Send the metrics to the staging backend. Requires a valid staging license key. Can be configured also with `global.nrStaging`
+# @default -- `false`
+nrStaging:
+
+receivers:
+  prometheus:
+    # -- (bool) Specifies whether the `prometheus` receiver is enabled
+    # @default -- `true`
+    enabled: true
+    # -- Sets the scrape interval for the `prometheus` receiver
+    # @default -- `1m`
+    scrapeInterval: 1m
+  k8sEvents:
+    # -- (bool) Specifies whether the `k8s_events` receiver is enabled
+    # @default -- `true`
+    enabled: true
+  hostmetrics:
+    # -- (bool) Specifies whether the `hostmetrics` receiver is enabled
+    # @default -- `true`
+    enabled: true
+    # -- Sets the scrape interval for the `hostmetrics` receiver
+    # @default -- `1m`
+    scrapeInterval: 1m
+  kubeletstats:
+    # -- (bool) Specifies whether the `kubeletstats` receiver is enabled
+    # @default -- `true`
+    enabled: true
+    # -- Sets the scrape interval for the `kubeletstats` receiver
+    # @default -- `1m`
+    scrapeInterval: 1m
+  filelog:
+    # -- (bool) Specifies whether the `filelog` receiver is enabled
+    # @default -- `true`
+    enabled: true
+
+# -- (bool) Send only the [metrics required](https://github.com/newrelic/helm-charts/tree/master/charts/nr-k8s-otel-collector/docs/metrics-lowDataMode.md) to light up the NR kubernetes UI
+# @default -- `true`
+lowDataMode: false
