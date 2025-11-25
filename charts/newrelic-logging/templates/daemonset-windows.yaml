@@ -47,8 +47,12 @@ spec:
       imagePullSecrets:
         {{- . | nindent 8 }}
       {{- end }}
-      {{- if $.Values.hostNetwork }}
-      hostNetwork: {{ $.Values.hostNetwork }}
+      {{- with include "newrelic.common.securityContext.pod" $ }}
+      securityContext:
+        {{- . | nindent 8 }}
+      {{- end }}
+      {{- with include "newrelic-logging.hostNetwork" $ }}
+      hostNetwork: {{ . }}
       {{- end }}
       {{- if $.Values.windows.initContainers }}
       initContainers:
@@ -59,8 +63,11 @@ spec:
           # We have to use 'replace' to remove the double-quotes that "newrelic.common.images.image" has, so that
           # we can append the Windows image tag suffix (and then re-quote that value)
           image: "{{ include "newrelic.common.images.image" ( dict "imageRoot" $.Values.image "context" $) | replace "\"" ""}}-{{ .imageTagSuffix }}"
-          imagePullPolicy: "{{ $.Values.image.pullPolicy }}"
-          securityContext: {}
+          imagePullPolicy: {{ include "newrelic.common.images.pullPolicy" ( dict "pullPolicy" $.Values.image.pullPolicy "context" $) | quote }}
+          {{- with include "newrelic.common.securityContext.container" $ }}
+          securityContext:
+            {{- . | nindent 12 }}
+          {{- end }}
           env:
             - name: ENDPOINT
               value: {{ include "newrelic-logging.logsEndpoint" $ | quote }}
@@ -79,7 +86,7 @@ spec:
             - name: CLUSTER_NAME
               value: {{ include "newrelic-logging.cluster" $ }}
             - name: LOG_LEVEL
-              value: {{ $.Values.fluentBit.logLevel | quote }}
+              value: {{ include "newrelic-logging.logLevel" $ | quote }}
             - name: LOG_PARSER
               {{- if $.Values.fluentBit.criEnabled }}
               value: "cri,docker"
@@ -115,8 +122,16 @@ spec:
               value: {{ $.Values.fluentBit.sendMetrics | default "false" | quote }}
             - name: METRICS_HOST
               value: {{ include "newrelic-logging.metricsHost" $ | quote }}
-            - name: FLUENTBIT_METRICS_TIER 
+            - name: FLUENTBIT_METRICS_TIER
               value: {{ $.Values.fluentBit.fluentBitMetrics | default "basic" | quote }}
+            {{- with include "newrelic-logging.proxy" $ }}
+            - name: HTTP_PROXY
+              value: {{ . | quote }}
+            - name: HTTPS_PROXY
+              value: {{ . | quote }}
+            - name: NO_PROXY
+              value: "localhost,127.0.0.1,169.254.169.254,kubernetes.default.svc.cluster.local,.svc,.svc.cluster.local"
+            {{- end }}
             {{- include "newrelic-logging.extraEnv" $ | nindent 12 }}
             - name: DAEMONSET_NAME
               value: {{ template "newrelic-logging.fullname" $ }}
@@ -181,8 +196,24 @@ spec:
         - name: progdata
           hostPath:
             path: C:\ProgramData
-      {{- if $.Values.priorityClassName }}
-      priorityClassName: {{ $.Values.priorityClassName }}
+      {{- with include "newrelic-logging.priorityClassName" $ }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- $affinity := include "newrelic-logging.affinity" $ }}
+      {{- if $affinity }}
+      affinity:
+        nodeAffinity:
+{{ $affinity | indent 10 }}
+      {{- else if include "newrelic.fargate" $ }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: eks.amazonaws.com/compute-type
+                    operator: NotIn
+                    values:
+                      - fargate
       {{- end }}
       nodeSelector:
         {{- if $.Values.windowsNodeSelector }}
@@ -192,9 +223,20 @@ spec:
         # Windows containers can only be executed on hosts running the exact same Windows version and build number
         node.kubernetes.io/windows-build: {{ .buildNumber }}
         {{- end }}
-      {{- if $.Values.tolerations }}
+        {{- with include "newrelic-logging.nodeSelector" $ }}
+{{ . | indent 8 }}
+        {{- end }}
+      {{- if hasKey $.Values "tolerations" }}
+        {{- if $.Values.tolerations }}
       tolerations:
-{{ toYaml $.Values.tolerations | indent 8 }}
+{{ toYaml $.Values.tolerations | nindent 8 }}
+        {{- end }}
+      {{- else if and $.Values.global $.Values.global.tolerations }}
+      tolerations:
+{{ toYaml $.Values.global.tolerations | nindent 8 }}
+      {{- else if $.Values.tolerations }}
+      tolerations:
+{{ toYaml $.Values.tolerations | nindent 8 }}
       {{- end }}
 ---
 {{- end }}
