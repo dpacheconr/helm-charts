@@ -47,7 +47,7 @@ spec:
         securityContext:
           {{- . | nindent 12 }}
         {{- end }}
-        image: {{ .Values.otelCollector.image.repository }}:{{ .Values.otelCollector.image.tag | default .Chart.AppVersion }}
+        image: {{ include "newrelic.common.images.image" ( dict "imageRoot" .Values.otelCollector.image "defaultRegistry" "docker.io" "context" .) }}
         imagePullPolicy: {{ .Values.otelCollector.image.pullPolicy }}
         resources: {{- toYaml .Values.otelCollector.resources | nindent 10}}
         ports:
