@@ -90,18 +90,25 @@ spec:
           - name: FILTER_NAMESPACE_REGEX
             value: '^({{ .Values.dropDataForNamespaces | join "|" }})$'
           - name: OTLP_ENDPOINT
-            {{- if eq $region "Staging" }}
+            {{- if and .Values.global .Values.global.fedramp .Values.global.fedramp.enabled }}
+            value: "gov-otlp.nr-data.net:4317"
+            {{- else if eq $region "Staging" }}
             value: "staging-otlp.nr-data.net:4317"
             {{- else if eq $region "EU" }}
             value: "otlp.eu01.nr-data.net:4317"
             {{- else }}
             value: "otlp.nr-data.net:4317"
             {{- end }}
-          {{- if .Values.proxy }}
+          {{- $globalProxy := "" }}
+          {{- if .Values.global }}
+            {{- $globalProxy = .Values.global.proxy | default "" }}
+          {{- end }}
+          {{- $proxy := .Values.proxy | default $globalProxy | default "" }}
+          {{- if $proxy }}
           - name: http_proxy
-            value: "{{- .Values.proxy }}"
+            value: {{ $proxy | quote }}
           - name: https_proxy
-            value: "{{- .Values.proxy }}"
+            value: {{ $proxy | quote }}
           {{- end }}
           - name: CLUSTER_NAME
             valueFrom:

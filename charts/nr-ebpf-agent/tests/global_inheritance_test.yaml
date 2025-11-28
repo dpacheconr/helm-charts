@@ -3,6 +3,7 @@ templates:
   - templates/nr-ebpf-agent-daemonset.yaml
   - templates/otel-collector-daemonset.yaml
   - templates/otel-collector-service-account.yaml
+  - templates/otel-collector-config.yaml
   - templates/secrets.yaml
 release:
   name: test-release
@@ -383,3 +384,105 @@ tests:
         equal:
           path: spec.template.spec.containers[0].securityContext.privileged
           value: true
+
+  # =============================================================================
+  # Proxy Tests (NEWLY IMPLEMENTED)
+  # =============================================================================
+  - it: should inherit global.proxy on otel-collector
+    set:
+      cluster: test-cluster
+      licenseKey: test-key
+      global:
+        proxy: http://proxy.corp.net:3128
+    asserts:
+      - template: templates/otel-collector-daemonset.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[5].name
+          value: http_proxy
+      - template: templates/otel-collector-daemonset.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[5].value
+          value: http://proxy.corp.net:3128
+      - template: templates/otel-collector-daemonset.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[6].name
+          value: https_proxy
+
+  - it: should allow local proxy to override global.proxy
+    set:
+      cluster: test-cluster
+      licenseKey: test-key
+      global:
+        proxy: http://global-proxy.corp.net:3128
+      proxy: http://local-proxy.corp.net:8080
+    asserts:
+      - template: templates/otel-collector-daemonset.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[5].value
+          value: http://local-proxy.corp.net:8080
+
+  # =============================================================================
+  # VerboseLog Tests (via common-library)
+  # =============================================================================
+  - it: should enable debug logging when global.verboseLog is true
+    set:
+      cluster: test-cluster
+      licenseKey: test-key
+      global:
+        verboseLog: true
+    asserts:
+      - template: templates/otel-collector-config.yaml
+        matchRegex:
+          path: data["config.yaml"]
+          pattern: 'level: "debug"'
+
+  - it: should not have debug logging when global.verboseLog is false
+    set:
+      cluster: test-cluster
+      licenseKey: test-key
+      global:
+        verboseLog: false
+    asserts:
+      - template: templates/otel-collector-config.yaml
+        notMatchRegex:
+          path: data["config.yaml"]
+          pattern: 'level: "debug"'
+
+  # =============================================================================
+  # NrStaging Tests (endpoint selection via common-library)
+  # =============================================================================
+  - it: should use staging endpoint when global.nrStaging is true
+    set:
+      cluster: test-cluster
+      licenseKey: test-key
+      global:
+        nrStaging: true
+    asserts:
+      - template: templates/otel-collector-daemonset.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[4].name
+          value: OTLP_ENDPOINT
+      - template: templates/otel-collector-daemonset.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[4].value
+          value: staging-otlp.nr-data.net:4317
+
+  # =============================================================================
+  # FedRAMP Tests (endpoint selection - NEWLY IMPLEMENTED)
+  # =============================================================================
+  - it: should use gov endpoint when global.fedramp.enabled is true
+    set:
+      cluster: test-cluster
+      licenseKey: test-key
+      global:
+        fedramp:
+          enabled: true
+    asserts:
+      - template: templates/otel-collector-daemonset.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[4].name
+          value: OTLP_ENDPOINT
+      - template: templates/otel-collector-daemonset.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[4].value
+          value: gov-otlp.nr-data.net:4317
