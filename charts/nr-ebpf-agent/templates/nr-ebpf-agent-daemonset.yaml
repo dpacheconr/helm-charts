@@ -71,7 +71,7 @@ spec:
 
       containers:
       - name: nr-ebpf-agent
-        image: {{ .Values.ebpfAgent.image.repository }}:{{ include "nr-ebpf-agent.imageTag" . }}
+        image: {{ include "newrelic.common.images.image" ( dict "imageRoot" .Values.ebpfAgent.image "defaultRegistry" "docker.io" "context" .) }}
         imagePullPolicy: {{ .Values.ebpfAgent.image.pullPolicy }}
         resources: {{ .Values.ebpfAgent.resources | toYaml | nindent 10 }}
         env:
