@@ -123,7 +123,7 @@ spec:
             value: "{{ .Values.ebpfAgent.distroKernelHeadersPath }}"
           {{- end }}
           - name: DEPLOYMENT_NAME
-            value: {{ .Values.cluster }}
+            value: {{ include "newrelic.common.cluster" . }}
           - name: HOST_IP
             valueFrom:
               fieldRef:
